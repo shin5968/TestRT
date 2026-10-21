@@ -25,8 +25,10 @@ jobs:
           $url = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip"
           Invoke-WebRequest -Uri $url -OutFile dxc.zip
           Expand-Archive -Path dxc.zip -DestinationPath C:\dxc -Force
-          $dxc = Get-ChildItem C:\dxc -Recurse -Filter dxc.exe | Select-Object -First 1
-          if (-not $dxc) { throw "dxc.exe not found" }
+          $dxc = Get-ChildItem C:\dxc -Recurse -Filter dxc.exe |
+                 Where-Object { $_.FullName -match '\\x64\\' } |
+                 Select-Object -First 1
+          if (-not $dxc) { throw "x64 dxc.exe not found" }
           "DXC=$($dxc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           & $dxc.FullName -T lib_6_3 -HV 2018 -Fo dxr_test.dxil src/dxr_test.hlsl
           if ($LASTEXITCODE -ne 0) { throw "dxc failed with $LASTEXITCODE" }
