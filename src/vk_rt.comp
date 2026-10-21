@@ -1,0 +1,214 @@
+#version 460
+#extension GL_EXT_ray_query : require
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+
+struct Tri {
+    vec4 p0;
+    vec4 p1;
+    vec4 p2;
+    vec4 n;
+    vec4 albedo;   // w = material (0 diffuse, 1 emissive, 2 metal, 3 dielectric)
+    vec4 emission;
+};
+
+layout(std430, binding = 1) readonly buffer Tris { Tri tris[]; };
+layout(std430, binding = 2) buffer Accum { vec4 acc[]; };
+layout(std430, binding = 3) writeonly buffer Out { uint outPx[]; };
+
+layout(push_constant) uniform PC {
+    vec4 camPos;
+    vec4 camFwd;
+    vec4 camRight;
+    vec4 camUp;
+    uvec4 p0;  // width, height, frameIndex, maxBounces
+    uvec4 p1;  // seed, lightTriIndex, pad, pad
+} pc;
+
+const float PI = 3.14159265359;
+const float TAN_HALF_FOV = 0.46630765815;  // tan(50deg / 2)
+
+uint rngState;
+
+float rnd() {
+    rngState = rngState * 747796405u + 2891336453u;
+    uint w = ((rngState >> ((rngState >> 28u) + 4u)) ^ rngState) * 277803737u;
+    w = (w >> 22u) ^ w;
+    return float(w & 0x00FFFFFFu) / 16777216.0;
+}
+
+vec3 cosineHemisphere(vec3 n) {
+    float u1 = rnd();
+    float u2 = rnd();
+    float r = sqrt(u1);
+    float phi = 2.0 * PI * u2;
+    vec3 t = abs(n.y) < 0.99 ? normalize(cross(n, vec3(0, 1, 0)))
+                             : normalize(cross(n, vec3(1, 0, 0)));
+    vec3 b = cross(n, t);
+    return normalize(t * cos(phi) * r + b * sin(phi) * r + n * sqrt(max(0.0, 1.0 - u1)));
+}
+
+bool refractRay(vec3 I, vec3 N, float eta, out vec3 T) {
+    float cosi = -dot(N, I);
+    float k = 1.0 - eta * eta * (1.0 - cosi * cosi);
+    if (k < 0.0) return false;
+    T = eta * I + (eta * cosi - sqrt(k)) * N;
+    return true;
+}
+
+struct Hit {
+    float t;
+    uint tri;
+    vec3 n;
+    vec3 albedo;
+    vec3 emission;
+    uint mat;
+};
+
+bool traceRay(vec3 ro, vec3 rd, float tmin, float tmax, out Hit h) {
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, tlas, gl_RayFlagsOpaqueEXT, 0xFF, ro, tmin, rd, tmax);
+    while (rayQueryProceedEXT(rq)) {}
+
+    if (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
+        return false;
+
+    h.t = rayQueryGetIntersectionTEXT(rq, true);
+    h.tri = rayQueryGetIntersectionPrimitiveIndexEXT(rq, true);
+    Tri tri = tris[h.tri];
+    h.n = normalize(tri.n.xyz);
+    h.albedo = tri.albedo.rgb;
+    h.emission = tri.emission.rgb;
+    h.mat = uint(tri.albedo.w + 0.5);
+    return true;
+}
+
+bool occluded(vec3 ro, vec3 rd, float tmax) {
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, tlas,
+                          gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+                          0xFF, ro, 1e-3, rd, tmax);
+    while (rayQueryProceedEXT(rq)) {}
+    return rayQueryGetIntersectionTypeEXT(rq, true) !=
+           gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+vec3 sampleLight(vec3 pos, vec3 n, vec3 albedo) {
+    Tri lt = tris[pc.p1.y];
+    float u = rnd();
+    float v = rnd();
+    if (u + v > 1.0) {
+        u = 1.0 - u;
+        v = 1.0 - v;
+    }
+    vec3 p = lt.p0.xyz + u * (lt.p1.xyz - lt.p0.xyz) + v * (lt.p2.xyz - lt.p0.xyz);
+    float area = 0.5 * length(cross(lt.p1.xyz - lt.p0.xyz, lt.p2.xyz - lt.p0.xyz));
+    vec3 toL = p - pos;
+    float dist = length(toL);
+    if (dist < 1e-4) return vec3(0);
+    vec3 L = toL / dist;
+    float cosS = max(0.0, dot(n, L));
+    float cosL = max(0.0, dot(normalize(lt.n.xyz), -L));
+    if (cosS <= 0.0 || cosL <= 0.0) return vec3(0);
+    if (occluded(pos + n * 1e-3, L, dist - 1e-3)) return vec3(0);
+    return (albedo / PI) * lt.emission.rgb *
+           (cosS * cosL / (dist * dist)) * area;
+}
+
+vec3 tracePath(vec3 ro, vec3 rd) {
+    vec3 radiance = vec3(0);
+    vec3 throughput = vec3(1);
+    bool specular = true;
+
+    for (uint bounce = 0; bounce <= pc.p0.w; ++bounce) {
+        Hit h;
+        if (!traceRay(ro, rd, 1e-3, 1e9, h)) {
+            radiance += throughput * vec3(0.02, 0.03, 0.05);
+            break;
+        }
+
+        if (h.mat == 1) {
+            if (bounce == 0 || specular) radiance += throughput * h.emission;
+            break;
+        }
+
+        vec3 n = dot(h.n, rd) < 0.0 ? h.n : -h.n;
+
+        if (h.mat == 0) {
+            specular = false;
+            vec3 pos = ro + rd * h.t;
+            radiance += throughput * sampleLight(pos, n, h.albedo);
+            throughput *= h.albedo;
+            rd = cosineHemisphere(n);
+            ro = pos + n * 1e-3;
+        } else if (h.mat == 2) {
+            specular = true;
+            throughput *= h.albedo;
+            vec3 pos = ro + rd * h.t;
+            rd = reflect(rd, n);
+            ro = pos + n * 1e-3;
+        } else {
+            specular = true;
+            vec3 pos = ro + rd * h.t;
+            vec3 I = rd;
+            bool entering = dot(I, n) < 0.0;
+            vec3 N = entering ? n : -n;
+            float eta = entering ? (1.0 / 1.5) : 1.5;
+            float cosi = clamp(-dot(I, N), 0.0, 1.0);
+            float F = 0.04 + 0.96 * pow(1.0 - cosi, 5.0);
+            vec3 dir;
+            if (rnd() < F) {
+                dir = reflect(I, N);
+            } else {
+                if (!refractRay(I, N, eta, dir)) dir = reflect(I, N);
+            }
+            rd = normalize(dir);
+            ro = pos + rd * 1e-3;
+        }
+
+        if (max(throughput.x, max(throughput.y, throughput.z)) < 0.01) break;
+    }
+    return min(radiance, vec3(32));
+}
+
+vec3 aces(vec3 x) {
+    x *= 0.6;
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+void main() {
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    uint width = pc.p0.x;
+    uint height = pc.p0.y;
+    if (gid.x >= width || gid.y >= height) return;
+
+    uint px = gid.x;
+    uint py = gid.y;
+    uint h = px * 1973u ^ py * 9277u ^ pc.p0.z * 26699u ^ pc.p1.x * 3331u;
+    rngState = h * 747796405u + 2891336453u;
+
+    float aspect = float(width) / float(height);
+    vec2 jitter = vec2(rnd(), rnd());
+    vec2 ndc = vec2(2.0 * (float(px) + jitter.x) / float(width) - 1.0,
+                    1.0 - 2.0 * (float(py) + jitter.y) / float(height));
+    vec3 dir = normalize(pc.camFwd.xyz
+                         + ndc.x * aspect * TAN_HALF_FOV * pc.camRight.xyz
+                         + ndc.y * TAN_HALF_FOV * pc.camUp.xyz);
+
+    vec3 c = tracePath(pc.camPos.xyz, dir);
+
+    uint idx = py * width + px;
+    vec4 prev = (pc.p0.z > 0u) ? acc[idx] : vec4(0);
+    acc[idx] = prev + vec4(c, 1.0);
+    vec3 outc = acc[idx].rgb / float(pc.p0.z + 1u);
+    outc = pow(aces(outc), vec3(1.0 / 2.2));
+
+    uint r = uint(clamp(outc.r, 0.0, 1.0) * 255.0 + 0.5);
+    uint g = uint(clamp(outc.g, 0.0, 1.0) * 255.0 + 0.5);
+    uint b = uint(clamp(outc.b, 0.0, 1.0) * 255.0 + 0.5);
+
+    // BGRA8 in memory for direct use by the GDI/D3D12 overlay texture.
+    outPx[idx] = (255u << 24) | (r << 16) | (g << 8) | b;
+}
