@@ -1,5 +1,7 @@
 # rtprobe — Winlator 레이트레이싱 테스트
 
+[![build-windows](https://github.com/shin5968/TestRT/actions/workflows/build.yml/badge.svg)](https://github.com/shin5968/TestRT/actions/workflows/build.yml)
+
 Winlator(Android)에서 **D3D12 + VKD3D-Proton + Turnip** 경로가 레이트레이싱을 어디까지
 지원하는지 진단하고, 같은 경로로 소프트웨어 레이트레이서를 렌더링해 성능을 측정하는
 단일 Windows x86_64 실행 파일입니다.

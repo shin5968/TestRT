@@ -1,0 +1,63 @@
+name: build-windows
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up llvm-mingw (UCRT, x86_64)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = "20251216"
+          $zip = "llvm-mingw-$ver-ucrt-x86_64.zip"
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/$zip"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath C:\llvm-mingw -Force
+          $root = Get-ChildItem C:\llvm-mingw -Directory | Select-Object -First 1
+          if (-not $root) { throw "llvm-mingw extraction failed" }
+          $bin = Join-Path $root.FullName "bin"
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & (Join-Path $bin "x86_64-w64-mingw32-clang++.exe") --version
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-llvm.cmake
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Verify PE32+ x86-64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $PWD "build\rtprobe.exe"
+          if (-not (Test-Path $exe)) { throw "rtprobe.exe not found" }
+          $item = Get-Item $exe
+          Write-Host "artifact size: $($item.Length) bytes"
+          $magic = [System.IO.File]::ReadAllBytes($exe)[0..1]
+          if ($magic[0] -ne 0x4D -or $magic[1] -ne 0x5A) { throw "not a PE file" }
+          & x86_64-w64-mingw32-objdump.exe -p $exe | Select-String "DLL Name"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtprobe-windows-x64
+          path: build/rtprobe.exe
+          if-no-files-found: error
+          retention-days: 30
