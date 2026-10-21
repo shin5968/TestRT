@@ -58,6 +58,7 @@ private:
 
     void applyResizeIfNeeded();
     void onKeyDown(WPARAM key);
+    void onOverlayButton(int index);
     void onMouseMove(int x, int y);
     void onMouseWheel(int delta);
     void toggleOverlay();

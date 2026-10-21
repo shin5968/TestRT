@@ -212,6 +212,7 @@ bool App::initGraphics() {
         logf("initGraphics: overlay resize failed");
         return false;
     }
+    overlay_.setButtons({"HW RT", "SOFT RT", "BENCH", "RESET", "SHOT"});
 
     refreshOverlay();
     return true;
@@ -781,6 +782,33 @@ void App::onKeyDown(WPARAM key) {
     }
 }
 
+void App::onOverlayButton(int index) {
+    switch (index) {
+    case 0:
+        if (mode_ == Mode::HwRt)
+            leaveHwRt();
+        else
+            enterHwRt();
+        break;
+    case 1:
+        if (mode_ == Mode::HwRt) leaveHwRt();
+        break;
+    case 2:
+        if (mode_ == Mode::HwRt) leaveHwRt();
+        if (mode_ == Mode::Demo) startBenchmark();
+        break;
+    case 3:
+        resetAccumulation();
+        overlayDirty_ = true;
+        break;
+    case 4:
+        requestScreenshot();
+        break;
+    default:
+        break;
+    }
+}
+
 void App::onMouseMove(int x, int y) {
     if (!dragging_) {
         lastMouseX_ = x;
@@ -822,12 +850,22 @@ LRESULT App::wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_KEYDOWN:
         onKeyDown(wp);
         return 0;
-    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDOWN: {
+        int mx = GET_X_LPARAM(lp);
+        int my = GET_Y_LPARAM(lp);
+        if (showOverlay_) {
+            int button = overlay_.buttonAt(mx, my);
+            if (button >= 0) {
+                onOverlayButton(button);
+                return 0;
+            }
+        }
         dragging_ = true;
-        lastMouseX_ = GET_X_LPARAM(lp);
-        lastMouseY_ = GET_Y_LPARAM(lp);
+        lastMouseX_ = mx;
+        lastMouseY_ = my;
         SetCapture(hwnd);
         return 0;
+    }
     case WM_LBUTTONUP:
         dragging_ = false;
         ReleaseCapture();

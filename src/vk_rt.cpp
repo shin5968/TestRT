@@ -46,11 +46,12 @@ V3 normalize(const V3& a) {
     return {a.x / l, a.y / l, a.z / l};
 }
 
-// 96 bytes, must match vk_rt.comp Tri.
+// 128 bytes, must match vk_rt.comp Tri.
+// p0,p1,p2, n0,n1,n2, albedo(w=material), emission
 struct TriData {
-    float v[6][4];
+    float v[8][4];
 };
-static_assert(sizeof(TriData) == 96, "TriData layout");
+static_assert(sizeof(TriData) == 128, "TriData layout");
 
 struct Buf {
     VkBuffer buffer = VK_NULL_HANDLE;
@@ -216,8 +217,8 @@ struct VulkanRt::Impl {
     bool upload(Buf& b, const void* data, size_t bytes);
     uint32_t findMemoryType(uint32_t bits, VkMemoryPropertyFlags flags, bool preferDeviceLocal);
     void destroyBuffer(Buf& b);
-    void addTri(const V3& a, const V3& b, const V3& c, const V3& n, const V3& albedo,
-                const V3& emission, uint32_t mat);
+    void addTri(const V3& a, const V3& b, const V3& c, const V3& na, const V3& nb,
+                const V3& nc, const V3& albedo, const V3& emission, uint32_t mat);
     void addQuad(const V3& a, const V3& b, const V3& c, const V3& d, const V3& albedo,
                  const V3& emission, uint32_t mat);
     void addSphere(const V3& center, float r, const V3& albedo);
@@ -664,8 +665,9 @@ void VulkanRt::Impl::destroyBuffer(Buf& b) {
     b.address = 0;
 }
 
-void VulkanRt::Impl::addTri(const V3& a, const V3& b, const V3& c, const V3& n,
-                            const V3& albedo, const V3& emission, uint32_t mat) {
+void VulkanRt::Impl::addTri(const V3& a, const V3& b, const V3& c, const V3& na,
+                            const V3& nb, const V3& nc, const V3& albedo,
+                            const V3& emission, uint32_t mat) {
     uint32_t base = (uint32_t)(verts.size() / 3);
     verts.insert(verts.end(), {a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z});
     indices.push_back(base);
@@ -676,18 +678,20 @@ void VulkanRt::Impl::addTri(const V3& a, const V3& b, const V3& c, const V3& n,
     t.v[0][0] = a.x; t.v[0][1] = a.y; t.v[0][2] = a.z;
     t.v[1][0] = b.x; t.v[1][1] = b.y; t.v[1][2] = b.z;
     t.v[2][0] = c.x; t.v[2][1] = c.y; t.v[2][2] = c.z;
-    t.v[3][0] = n.x; t.v[3][1] = n.y; t.v[3][2] = n.z;
-    t.v[4][0] = albedo.x; t.v[4][1] = albedo.y; t.v[4][2] = albedo.z;
-    t.v[4][3] = (float)mat;
-    t.v[5][0] = emission.x; t.v[5][1] = emission.y; t.v[5][2] = emission.z;
+    t.v[3][0] = na.x; t.v[3][1] = na.y; t.v[3][2] = na.z;
+    t.v[4][0] = nb.x; t.v[4][1] = nb.y; t.v[4][2] = nb.z;
+    t.v[5][0] = nc.x; t.v[5][1] = nc.y; t.v[5][2] = nc.z;
+    t.v[6][0] = albedo.x; t.v[6][1] = albedo.y; t.v[6][2] = albedo.z;
+    t.v[6][3] = (float)mat;
+    t.v[7][0] = emission.x; t.v[7][1] = emission.y; t.v[7][2] = emission.z;
     tris.push_back(t);
 }
 
 void VulkanRt::Impl::addQuad(const V3& a, const V3& b, const V3& c, const V3& d,
                              const V3& albedo, const V3& emission, uint32_t mat) {
     V3 n = normalize(cross(b - a, c - a));
-    addTri(a, b, c, n, albedo, emission, mat);
-    addTri(a, c, d, n, albedo, emission, mat);
+    addTri(a, b, c, n, n, n, albedo, emission, mat);
+    addTri(a, c, d, n, n, n, albedo, emission, mat);
 }
 
 void VulkanRt::Impl::addSphere(const V3& center, float r, const V3& albedo) {
@@ -706,10 +710,12 @@ void VulkanRt::Impl::addSphere(const V3& center, float r, const V3& albedo) {
             V3 p01 = P(i, j + 1);
             V3 p10 = P(i + 1, j);
             V3 p11 = P(i + 1, j + 1);
-            V3 n1 = normalize(cross(p10 - p00, p11 - p00));
-            V3 n2 = normalize(cross(p11 - p00, p01 - p00));
-            addTri(p00, p10, p11, n1, albedo, {0, 0, 0}, 0);
-            addTri(p00, p11, p01, n2, albedo, {0, 0, 0}, 0);
+            V3 n00 = normalize(p00 - center);
+            V3 n01 = normalize(p01 - center);
+            V3 n10 = normalize(p10 - center);
+            V3 n11 = normalize(p11 - center);
+            addTri(p00, p10, p11, n00, n10, n11, albedo, {0, 0, 0}, 0);
+            addTri(p00, p11, p01, n00, n11, n01, albedo, {0, 0, 0}, 0);
         }
     }
 }
@@ -747,12 +753,12 @@ bool VulkanRt::Impl::createScene(std::string& err) {
     // Metal sphere
     size_t before = tris.size();
     addSphere({0.45f, 0.43f, 0.90f}, 0.43f, {0.92f, 0.75f, 0.38f});
-    for (size_t i = before; i < tris.size(); ++i) tris[i].v[4][3] = 2.0f;
+    for (size_t i = before; i < tris.size(); ++i) tris[i].v[6][3] = 2.0f;
 
     // Glass sphere
     before = tris.size();
     addSphere({0.12f, 0.27f, 0.38f}, 0.27f, {0.95f, 0.95f, 0.95f});
-    for (size_t i = before; i < tris.size(); ++i) tris[i].v[4][3] = 3.0f;
+    for (size_t i = before; i < tris.size(); ++i) tris[i].v[6][3] = 3.0f;
 
     vertexCount = (uint32_t)(verts.size() / 3);
     triangleCount = (uint32_t)(indices.size() / 3);

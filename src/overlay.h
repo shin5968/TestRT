@@ -17,6 +17,9 @@ public:
     void render(const std::vector<std::string>& lines, const uint8_t* bgBGRA,
                 int bgWidth, int bgHeight);
 
+    void setButtons(const std::vector<std::string>& labels);
+    int buttonAt(int x, int y) const;  // -1 if none
+
     const uint8_t* pixels() const { return (const uint8_t*)bits_; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -36,4 +39,6 @@ private:
     int height_ = 0;
     int fontHeight_ = 0;
     uint32_t version_ = 0;
+    std::vector<std::string> buttonLabels_;
+    std::vector<RECT> buttonRects_;
 };

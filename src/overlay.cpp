@@ -77,6 +77,18 @@ bool Overlay::resize(int w, int h) {
     return true;
 }
 
+void Overlay::setButtons(const std::vector<std::string>& labels) {
+    buttonLabels_ = labels;
+}
+
+int Overlay::buttonAt(int x, int y) const {
+    POINT p{x, y};
+    for (size_t i = 0; i < buttonRects_.size(); ++i) {
+        if (PtInRect(&buttonRects_[i], p)) return (int)i;
+    }
+    return -1;
+}
+
 void Overlay::render(const std::vector<std::string>& lines) {
     render(lines, nullptr, 0, 0);
 }
@@ -112,12 +124,13 @@ void Overlay::render(const std::vector<std::string>& lines, const uint8_t* bgBGR
 
     int y = 10;
     int lineHeight = fontHeight_ + 4;
+    const int bottomReserve = buttonLabels_.empty() ? 0 : 50;
     for (const auto& line : lines) {
         if (line.empty()) {
             y += lineHeight / 2;
             continue;
         }
-        if (y + lineHeight > height_) break;
+        if (y + lineHeight > height_ - bottomReserve) break;
         std::wstring wline = widen(line);
 
         SetTextColor(memdc_, RGB(0, 0, 0));
@@ -125,6 +138,32 @@ void Overlay::render(const std::vector<std::string>& lines, const uint8_t* bgBGR
         SetTextColor(memdc_, RGB(255, 255, 255));
         TextOutW(memdc_, 12, y, wline.c_str(), (int)wline.size());
         y += lineHeight;
+    }
+
+    buttonRects_.clear();
+    if (!buttonLabels_.empty()) {
+        const int n = (int)buttonLabels_.size();
+        const int gap = 8;
+        const int bh = 32;
+        const int by = height_ - bh - 10;
+        int bw = (width_ - 20 - gap * (n - 1)) / n;
+        bw = std::min(150, std::max(48, bw));
+        HBRUSH fill = CreateSolidBrush(RGB(18, 22, 32));
+        HBRUSH border = CreateSolidBrush(RGB(110, 120, 145));
+        for (int i = 0; i < n; ++i) {
+            RECT r{10 + i * (bw + gap), by, 10 + i * (bw + gap) + bw, by + bh};
+            buttonRects_.push_back(r);
+            FillRect(memdc_, &r, fill);
+            FrameRect(memdc_, &r, border);
+            SetTextColor(memdc_, RGB(245, 245, 245));
+            std::wstring wlabel = widen(buttonLabels_[i]);
+            RECT tr = r;
+            tr.left += 10;
+            DrawTextW(memdc_, wlabel.c_str(), -1, &tr,
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
+        DeleteObject(fill);
+        DeleteObject(border);
     }
 
     // Text is drawn as white (with a dark shadow). With a background image the

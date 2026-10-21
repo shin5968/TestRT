@@ -163,6 +163,9 @@ Vulkan 타임스탬프로 **GPU 프레임 타임**을, CPU 시간으로 **readba
 | `V` | VSync 토글 |
 | `Esc` | 종료 |
 
+화면 하단의 터치 버튼(`HW RT`, `SOFT RT`, `BENCH`, `RESET`, `SHOT`)으로도 조작할 수 있습니다.
+Winlator에서 온스크린 키보드 없이 모드를 바꿀 때 사용하세요.
+
 HW RT 데모는 창과 같은 해상도(기본 1280x720)로 렌더링하고, 결과를 CPU로 읽어
 D3D12 오버레이 화면에 그대로 표시합니다. CPU readback 비용이 FPS에 포함됩니다.
 초기화에 실패하면 오버레이와 `rtprobe.log`에 `Vulkan RT: <이유>`가 표시되고

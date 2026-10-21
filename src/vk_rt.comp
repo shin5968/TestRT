@@ -9,7 +9,9 @@ struct Tri {
     vec4 p0;
     vec4 p1;
     vec4 p2;
-    vec4 n;
+    vec4 n0;       // per-vertex normals for smooth shading
+    vec4 n1;
+    vec4 n2;
     vec4 albedo;   // w = material (0 diffuse, 1 emissive, 2 metal, 3 dielectric)
     vec4 emission;
 };
@@ -77,8 +79,11 @@ bool traceRay(vec3 ro, vec3 rd, float tmin, float tmax, out Hit h) {
 
     h.t = rayQueryGetIntersectionTEXT(rq, true);
     h.tri = rayQueryGetIntersectionPrimitiveIndexEXT(rq, true);
+    vec2 bc = rayQueryGetIntersectionBarycentricsEXT(rq, true);
     Tri tri = tris[h.tri];
-    h.n = normalize(tri.n.xyz);
+    h.n = normalize(tri.n0.xyz * (1.0 - bc.x - bc.y)
+                    + tri.n1.xyz * bc.x
+                    + tri.n2.xyz * bc.y);
     h.albedo = tri.albedo.rgb;
     h.emission = tri.emission.rgb;
     h.mat = uint(tri.albedo.w + 0.5);
@@ -113,7 +118,7 @@ vec3 sampleLight(vec3 pos, vec3 n, vec3 albedo) {
     if (dist < 1e-4) return vec3(0);
     vec3 L = toL / dist;
     float cosS = max(0.0, dot(n, L));
-    float cosL = max(0.0, dot(normalize(lt.n.xyz), -L));
+    float cosL = max(0.0, dot(normalize(lt.n0.xyz), -L));
     if (cosS <= 0.0 || cosL <= 0.0) return vec3(0);
     if (occluded(pos + n * 1e-3, L, dist - 1e-3)) return vec3(0);
     return (albedo / PI) * lt.emission.rgb *

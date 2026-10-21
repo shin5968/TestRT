@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: C:\llvm-mingw
+          key: llvm-mingw-20251216-ucrt-x86_64
+
+      - name: Set up llvm-mingw (UCRT, x86_64)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = "20251216"
+          $root = "C:\llvm-mingw\llvm-mingw-$ver-ucrt-x86_64"
+          $clang = Join-Path $root "bin\x86_64-w64-mingw32-clang++.exe"
+          if (-not (Test-Path $clang)) {
+            $zip = "llvm-mingw-$ver-ucrt-x86_64.zip"
+            $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/$zip"
+            Invoke-WebRequest -Uri $url -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath C:\llvm-mingw -Force
+          }
+          (Join-Path $root "bin") | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install Ninja
+        run: choco install ninja -y --no-progress
+
+      - name: Configure
+        shell: cmd
+        run: cmake -S . -B build -G Ninja --toolchain "cmake/mingw-llvm.cmake" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: cmd
+        run: cmake --build build
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/rtprobe.exe
+          generate_release_notes: true
