@@ -1,0 +1,41 @@
+name: build-dxil
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - src/dxr_test.hlsl
+      - .github/workflows/dxil.yml
+
+permissions:
+  contents: read
+
+jobs:
+  dxil:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download DXC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip"
+          Invoke-WebRequest -Uri $url -OutFile dxc.zip
+          Expand-Archive -Path dxc.zip -DestinationPath C:\dxc -Force
+          $dxc = Get-ChildItem C:\dxc -Recurse -Filter dxc.exe | Select-Object -First 1
+          if (-not $dxc) { throw "dxc.exe not found" }
+          "DXC=$($dxc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $dxc.FullName -T lib_6_3 -HV 2018 -Fo dxr_test.dxil src/dxr_test.hlsl
+          if ($LASTEXITCODE -ne 0) { throw "dxc failed with $LASTEXITCODE" }
+          Get-Item dxr_test.dxil | Format-List Name,Length
+
+      - name: Upload DXIL
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxr-test-dxil
+          path: dxr_test.dxil
+          if-no-files-found: error
+          retention-days: 30
