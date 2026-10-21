@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bench.h"
+#include "dxr_test.h"
 #include "probe.h"
 #include "scene.h"
 
@@ -26,6 +27,8 @@ struct ReportData {
     uint32_t hwTriangles = 0;
     double hwTimestampPeriodNs = 0.0;
     std::string hwError;
+
+    DxrTestResult dxr;
 };
 
 bool writeReportJSON(const std::string& path, const ReportData& data);

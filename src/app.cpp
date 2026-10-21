@@ -88,6 +88,16 @@ int App::run(HINSTANCE hInst, const AppOptions& opts) {
         return 2;
     }
 
+    if (opts_.dxrTest) {
+        bool ok = runDxrTest(ctx_, &api_, dxrResult_);
+        logf("DXR test: ok=%d stage=%s hits=%u/%u error=%s", (int)ok,
+             dxrResult_.stage.c_str(), dxrResult_.hits, dxrResult_.total,
+             dxrResult_.error.c_str());
+        writeReport("dxr-test");
+        shutdown();
+        return ok ? 0 : 5;
+    }
+
     if (opts_.benchHw) {
         int rc = runHwRtBenchmark();
         writeReport("hwrt-bench");
@@ -238,6 +248,7 @@ void App::writeReport(const std::string& mode) {
     rd.hwTriangles = hwBenchTriangles_;
     rd.hwTimestampPeriodNs = hwBenchTimestampPeriodNs_;
     rd.hwError = vkError_;
+    rd.dxr = dxrResult_;
     writeReportJSON(outPath("rtprobe-report.json"), rd);
 }
 

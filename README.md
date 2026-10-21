@@ -107,6 +107,34 @@ rtprobe.exe --bench --frames 300 --width 960 --height 540
 `--bench`는 창을 띄운 채 자동으로 워밍업 후 측정하고, 끝나면 종료합니다.
 기본 측정: 1280x720, 1 spp/frame, 4 bounces, 워밍업 10초, 600프레임.
 
+### DXR RTPSO 최소 테스트
+
+```text
+rtprobe.exe --dxr-test
+```
+
+D3D12로 1개 삼각형 BLAS/TLAS를 만들고, 임베드된 DXIL(`lib_6_3`)로 RTPSO를 생성한 뒤
+64x64 레이를 `DispatchRays`로 추적해 히트 수를 셉니다. 소프트웨어/HW RT 데모와 달리
+**Windows 게임과 동일한 D3D12 DXR 경로**를 검증합니다.
+
+결과는 리포트의 `dxr_test`에 기록됩니다:
+
+```json
+"dxr_test": {
+  "attempted": true,
+  "as_built": true,
+  "state_object_created": true,
+  "dispatched": true,
+  "width": 64, "height": 64, "total": 4096,
+  "hits": 4096,
+  "stage": "done",
+  "error": ""
+}
+```
+
+`stage`는 실패 지점(`geometry`, `blas`, `tlas`, `root_signature`, `state_object`,
+`shader_table`, `output`, `commands`, `readback`)을 알려줍니다.
+
 ### 하드웨어 RT 벤치마크
 
 ```text
@@ -147,6 +175,7 @@ D3D12 오버레이 화면에 그대로 표시합니다. CPU readback 비용이 F
 --vulkan-rt, --hwrt     시작 시 Vulkan ray query HW RT 데모 활성화
 --bench                 워밍업 → 측정 → 리포트 → 종료 (소프트웨어 RT)
 --bench-hw, --hwrt-bench  Vulkan ray query 하드웨어 RT 벤치마크 → 리포트 → 종료
+--dxr-test              D3D12 DXR RTPSO 최소 테스트 → 리포트 → 종료
 --seconds N             고정 시간 측정 (N초)
 --frames N              고정 프레임 측정 (기본 600, 최대 2000)
 --width W --height H    렌더/창 해상도 (기본 1280x720)
@@ -187,9 +216,11 @@ D3D12 오버레이 화면에 그대로 표시합니다. CPU readback 비용이 F
 
 ## 알려진 한계 / 문제 해결
 
-- **D3D12 DXR RTPSO 경로는 구현하지 않았습니다.** DXIL(SM 6.3+) 컴파일러가 없으면 RTPSO를
-  만들 수 없기 때문입니다. `RaytracingTier`가 1.0 이상으로 나오는 특수한 환경이 있다면
-  리포트의 tier/확장 정보로 판단하세요.
+- **D3D12 DXR RTPSO는 최소 테스트만 제공합니다.** DXIL은 GitHub Actions에서 DXC로 생성해
+  임베드했고, `--dxr-test`가 BLAS/TLAS → RTPSO → DispatchRays → 히트 수까지 검증합니다.
+  Cornell box를 DXR로 렌더링하는 시각 모드는 아직 구현하지 않았습니다.
+- `--dxr-test`가 `state_object` 단계에서 실패하면 vkd3d-proton/드라이버의 DXR 셰이더 모델
+  지원 문제일 수 있습니다. `VKD3D_SHADER_MODEL=6_6`을 컨테이너 환경변수로 설정해 재시도하세요.
 - **HW RT는 Vulkan 경로로 검증합니다.** `VK_KHR_acceleration_structure` +
   `VK_KHR_ray_query`(+ buffer device address)가 필요합니다. vkd3d-proton/DXR과 같은
   디바이스 드라이버를 사용하므로, 이 모드가 동작하면 하드웨어 RT 자체는 정상입니다.
@@ -221,6 +252,9 @@ src/shaders.h           HLSL (패스 트레이서 + 컴포지트)
 src/vk_rt.cpp/.h        Vulkan 가속구조 + ray query HW RT
 src/vk_rt.comp          HW RT GLSL 셰이더 (SPIR-V로 임베드)
 src/vk_rt_spv.h         임베드된 SPIR-V (생성 파일)
+src/dxr_test.cpp/.h     D3D12 DXR RTPSO 최소 테스트
+src/dxr_test.hlsl       DXR 셰이더 (DXIL로 임베드)
+src/dxr_test_dxil.h     임베드된 DXIL (생성 파일)
 src/overlay.cpp/.h      GDI 기반 텍스트/이미지 오버레이
 src/bench.cpp/.h        통계/백분위
 src/report.cpp/.h       JSON 리포트

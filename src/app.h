@@ -2,6 +2,7 @@
 
 #include "bench.h"
 #include "d3d12_ctx.h"
+#include "dxr_test.h"
 #include "overlay.h"
 #include "probe.h"
 #include "renderer.h"
@@ -15,6 +16,7 @@ struct AppOptions {
     bool probeOnly = false;
     bool bench = false;
     bool benchHw = false;
+    bool dxrTest = false;
     bool vulkanRt = false;
     bool vsync = false;
     bool borderless = false;
@@ -110,6 +112,8 @@ private:
     uint32_t hwBenchTriangles_ = 0;
     double hwBenchTimestampPeriodNs_ = 0.0;
     double hwBenchWarmupSeconds_ = 3.0;
+
+    DxrTestResult dxrResult_;
 
     float yaw_ = 0.0f;
     float pitch_ = 0.10f;

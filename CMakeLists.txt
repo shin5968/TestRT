@@ -11,6 +11,7 @@ set(RTPROBE_SOURCES
     src/util.cpp
     src/d3d12_ctx.cpp
     src/probe.cpp
+    src/dxr_test.cpp
     src/scene.cpp
     src/renderer.cpp
     src/vk_rt.cpp

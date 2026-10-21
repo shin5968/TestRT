@@ -49,6 +49,8 @@ AppOptions parseArgs(const std::string& cmdline) {
             o.vulkanRt = true;
         } else if (a == "--bench-hw" || a == "--hwrt-bench") {
             o.benchHw = true;
+        } else if (a == "--dxr-test") {
+            o.dxrTest = true;
         } else if (a == "--seconds") {
             o.seconds = next(o.seconds);
         } else if (a == "--frames") {

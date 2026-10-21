@@ -199,6 +199,19 @@ bool writeReportJSON(const std::string& path, const ReportData& d) {
         }
     }
 
+    j += "  \"dxr_test\": {\n";
+    j += "    \"attempted\": " + boolStr(d.dxr.attempted) + ",\n";
+    j += "    \"as_built\": " + boolStr(d.dxr.asBuilt) + ",\n";
+    j += "    \"state_object_created\": " + boolStr(d.dxr.stateObjectCreated) + ",\n";
+    j += "    \"dispatched\": " + boolStr(d.dxr.dispatched) + ",\n";
+    j += strf("    \"width\": %u,\n", d.dxr.width);
+    j += strf("    \"height\": %u,\n", d.dxr.height);
+    j += strf("    \"total\": %u,\n", d.dxr.total);
+    j += strf("    \"hits\": %u,\n", d.dxr.hits);
+    j += "    \"stage\": " + q(d.dxr.stage) + ",\n";
+    j += "    \"error\": " + q(d.dxr.error) + "\n";
+    j += "  },\n";
+
     j += "  \"verdict\": " + q(p.verdict) + "\n";
     j += "}\n";
 
