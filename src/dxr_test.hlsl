@@ -10,8 +10,8 @@ struct Payload {
     uint pad2;
 };
 
-struct ShadowPayload {
-    uint occluded;
+struct Attributes {
+    float2 bary;
 };
 
 RaytracingAccelerationStructure gTlas : register(t0);
@@ -50,9 +50,10 @@ void RayGen() {
 }
 
 [shader("closesthit")]
-void ClosestHit(inout Payload p, in float2 bary : SV_Barycentrics) {
+void ClosestHit(inout Payload p, in Attributes attr) {
     p.hit = 1;
-    p.color = float4(bary.x, bary.y, 1.0 - bary.x - bary.y, 1.0);
+    p.color = float4(attr.bary.x, attr.bary.y,
+                     1.0 - attr.bary.x - attr.bary.y, 1.0);
 }
 
 [shader("miss")]
