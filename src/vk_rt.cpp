@@ -105,6 +105,12 @@ struct Fns {
     PFN_vkWaitForFences waitForFences = nullptr;
     PFN_vkResetFences resetFences = nullptr;
 
+    PFN_vkCreateQueryPool createQueryPool = nullptr;
+    PFN_vkDestroyQueryPool destroyQueryPool = nullptr;
+    PFN_vkCmdResetQueryPool cmdResetQueryPool = nullptr;
+    PFN_vkCmdWriteTimestamp cmdWriteTimestamp = nullptr;
+    PFN_vkGetQueryPoolResults getQueryPoolResults = nullptr;
+
     PFN_vkCreateShaderModule createShaderModule = nullptr;
     PFN_vkDestroyShaderModule destroyShaderModule = nullptr;
     PFN_vkCreateDescriptorSetLayout createDescriptorSetLayout = nullptr;
@@ -163,6 +169,11 @@ struct VulkanRt::Impl {
     VkCommandPool cmdPool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
+    VkQueryPool queryPool = VK_NULL_HANDLE;
+    bool gpuTiming = false;
+    double timestampPeriodNs = 0.0;
+    double lastGpuMs = 0.0;
+    uint32_t triangleCount = 0;
 
     VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
     VkDescriptorPool dpool = VK_NULL_HANDLE;
@@ -327,6 +338,8 @@ bool VulkanRt::Impl::chooseDevice(std::string& err) {
 
         phys = p;
         deviceName = props.deviceName;
+        timestampPeriodNs = (double)props.limits.timestampPeriod;
+        gpuTiming = props.limits.timestampComputeAndGraphics != 0 && timestampPeriodNs > 0.0;
 
         VkPhysicalDeviceAccelerationStructurePropertiesKHR asp{};
         asp.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
@@ -471,6 +484,11 @@ void VulkanRt::Impl::loadDeviceFns() {
     LOADD(destroyFence, DestroyFence)
     LOADD(waitForFences, WaitForFences)
     LOADD(resetFences, ResetFences)
+    LOADD(createQueryPool, CreateQueryPool)
+    LOADD(destroyQueryPool, DestroyQueryPool)
+    LOADD(cmdResetQueryPool, CmdResetQueryPool)
+    LOADD(cmdWriteTimestamp, CmdWriteTimestamp)
+    LOADD(getQueryPoolResults, GetQueryPoolResults)
     LOADD(createShaderModule, CreateShaderModule)
     LOADD(destroyShaderModule, DestroyShaderModule)
     LOADD(createDescriptorSetLayout, CreateDescriptorSetLayout)
@@ -522,6 +540,22 @@ bool VulkanRt::Impl::createCommandObjects(std::string& err) {
         err = "vkCreateFence failed: " + vkRes(vr);
         return false;
     }
+
+    if (gpuTiming && fn.createQueryPool) {
+        VkQueryPoolCreateInfo qp{};
+        qp.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        qp.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qp.queryCount = 2;
+        vr = fn.createQueryPool(device, &qp, nullptr, &queryPool);
+        if (vr != VK_SUCCESS) {
+            logf("Vulkan timestamp query pool unavailable: %s", vkRes(vr).c_str());
+            queryPool = VK_NULL_HANDLE;
+            gpuTiming = false;
+        }
+    } else {
+        gpuTiming = false;
+    }
+    logf("Vulkan RT GPU timing: %d (period=%.2f ns)", (int)gpuTiming, timestampPeriodNs);
     return true;
 }
 
@@ -721,6 +755,7 @@ bool VulkanRt::Impl::createScene(std::string& err) {
     for (size_t i = before; i < tris.size(); ++i) tris[i].v[4][3] = 3.0f;
 
     vertexCount = (uint32_t)(verts.size() / 3);
+    triangleCount = (uint32_t)(indices.size() / 3);
     if (vertexCount == 0 || indices.empty()) {
         err = "empty scene";
         return false;
@@ -1100,11 +1135,20 @@ bool VulkanRt::Impl::render(const VkRtPush& push, std::string& err) {
         return false;
     }
 
+    if (queryPool && fn.cmdResetQueryPool && fn.cmdWriteTimestamp) {
+        fn.cmdResetQueryPool(cmd, queryPool, 0, 2);
+        fn.cmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queryPool, 0);
+    }
+
     fn.cmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     fn.cmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, playout, 0, 1, &dset, 0,
                              nullptr);
     fn.cmdPushConstants(cmd, playout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
     fn.cmdDispatch(cmd, (width + 7) / 8, (height + 7) / 8, 1);
+
+    if (queryPool && fn.cmdWriteTimestamp) {
+        fn.cmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queryPool, 1);
+    }
 
     VkMemoryBarrier mb{};
     mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1134,6 +1178,17 @@ bool VulkanRt::Impl::render(const VkRtPush& push, std::string& err) {
         return false;
     }
     fn.resetFences(device, 1, &fence);
+
+    lastGpuMs = 0.0;
+    if (queryPool && fn.getQueryPoolResults && timestampPeriodNs > 0.0) {
+        uint64_t ts[2] = {0, 0};
+        VkResult qr = fn.getQueryPoolResults(device, queryPool, 0, 2, sizeof(ts), ts,
+                                             sizeof(uint64_t),
+                                             VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+        if (qr == VK_SUCCESS && ts[1] >= ts[0]) {
+            lastGpuMs = (double)(ts[1] - ts[0]) * timestampPeriodNs / 1000000.0;
+        }
+    }
     return true;
 }
 
@@ -1170,6 +1225,9 @@ void VulkanRt::Impl::shutdown() {
         destroyBuffer(blasScratch);
         destroyBuffer(tlasScratch);
 
+        if (queryPool && fn.destroyQueryPool)
+            fn.destroyQueryPool(device, queryPool, nullptr);
+        queryPool = VK_NULL_HANDLE;
         if (fence && fn.destroyFence) fn.destroyFence(device, fence, nullptr);
         fence = VK_NULL_HANDLE;
         if (cmdPool && fn.destroyCommandPool)
@@ -1257,6 +1315,10 @@ bool VulkanRt::init(int width, int height, std::string& error) {
     driverInfo_ = impl_->driverInfo;
     extensions_ = impl_->extensionList;
     lightTriIndex_ = impl_->lightTri;
+    triangleCount_ = impl_->triangleCount;
+    gpuTimingAvailable_ = impl_->gpuTiming;
+    timestampPeriodNs_ = impl_->timestampPeriodNs;
+    lastGpuMs_ = 0.0;
     ready_ = true;
     logf("Vulkan RT ready: %dx%d device=%s (%s)", width, height, deviceName_.c_str(),
          driverInfo_.c_str());
@@ -1288,5 +1350,6 @@ bool VulkanRt::render(const VkRtPush& push, std::string& error) {
     if (impl_->outPixels) {
         memcpy(pixels_.data(), impl_->outPixels, pixels_.size());
     }
+    lastGpuMs_ = impl_->lastGpuMs;
     return true;
 }

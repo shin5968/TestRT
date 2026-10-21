@@ -271,8 +271,9 @@ float3 tracePath(float3 ro, float3 rd, inout uint rayCount) {
         } else {
             specular = true;
             float3 I = rd;
-            bool entering = dot(I, n) < 0.0;
-            float3 N = entering ? n : -n;
+            // Geometric normal, not the shading normal flipped toward the ray.
+            bool entering = dot(I, h.n) < 0.0;
+            float3 N = entering ? h.n : -h.n;
             float eta = entering ? (1.0 / 1.5) : 1.5;
             float cosi = saturate(-dot(I, N));
             float F = 0.04 + 0.96 * pow(1.0 - cosi, 5.0);

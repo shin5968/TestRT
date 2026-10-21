@@ -160,6 +160,45 @@ bool writeReportJSON(const std::string& path, const ReportData& d) {
         j += "  \"benchmark\": null,\n";
     }
 
+    if (d.hwBenchRan) {
+        const BenchResult& b = d.hwBench;
+        j += "  \"hardware_rt_benchmark\": {\n";
+        j += strf("    \"width\": %u,\n", b.width);
+        j += strf("    \"height\": %u,\n", b.height);
+        j += strf("    \"samples_per_frame\": %u,\n", b.samplesPerFrame);
+        j += strf("    \"bounces\": %u,\n", b.bounces);
+        j += strf("    \"frames\": %u,\n", b.frames);
+        j += strf("    \"warmup_seconds\": %.1f,\n", b.warmupSeconds);
+        j += strf("    \"measure_seconds\": %.3f,\n", b.measureSeconds);
+        j += "    \"gpu_timing\": " + boolStr(b.gpuTiming) + ",\n";
+        j += strf("    \"timestamp_period_ns\": %.3f,\n", d.hwTimestampPeriodNs);
+        j += "    \"cpu_frame\": " + statsJson(b.cpu) + ",\n";
+        j += "    \"gpu_frame\": " + statsJson(b.gpu) + ",\n";
+        j += strf("    \"primary_rays_per_sec\": %.0f,\n", b.primaryRaysPerSec);
+        j += "    \"device\": " + q(d.hwDevice) + ",\n";
+        j += "    \"driver\": " + q(d.hwDriver) + ",\n";
+        j += "    \"extensions\": " + q(d.hwExtensions) + ",\n";
+        j += strf("    \"triangles\": %u,\n", d.hwTriangles);
+        j += "    \"cpu_frame_ms\": [";
+        for (size_t i = 0; i < b.cpuMs.size(); ++i) {
+            if (i) j += ",";
+            j += strf("%.3f", b.cpuMs[i]);
+        }
+        j += "],\n";
+        j += "    \"gpu_frame_ms\": [";
+        for (size_t i = 0; i < b.gpuMs.size(); ++i) {
+            if (i) j += ",";
+            j += strf("%.3f", b.gpuMs[i]);
+        }
+        j += "]\n";
+        j += "  },\n";
+    } else {
+        j += "  \"hardware_rt_benchmark\": null,\n";
+        if (!d.hwError.empty()) {
+            j += "  \"hardware_rt_error\": " + q(d.hwError) + ",\n";
+        }
+    }
+
     j += "  \"verdict\": " + q(p.verdict) + "\n";
     j += "}\n";
 

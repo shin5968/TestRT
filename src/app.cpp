@@ -88,6 +88,13 @@ int App::run(HINSTANCE hInst, const AppOptions& opts) {
         return 2;
     }
 
+    if (opts_.benchHw) {
+        int rc = runHwRtBenchmark();
+        writeReport("hwrt-bench");
+        shutdown();
+        return rc;
+    }
+
     if (opts_.vulkanRt) enterHwRt();
     if (opts_.bench && mode_ != Mode::HwRt) startBenchmark();
 
@@ -223,6 +230,14 @@ void App::writeReport(const std::string& mode) {
     rd.mode = mode;
     rd.benchRan = benchRan_;
     rd.bench = benchResult_;
+    rd.hwBenchRan = hwBenchRan_;
+    rd.hwBench = hwBenchResult_;
+    rd.hwDevice = hwBenchDevice_;
+    rd.hwDriver = hwBenchDriver_;
+    rd.hwExtensions = hwBenchExtensions_;
+    rd.hwTriangles = hwBenchTriangles_;
+    rd.hwTimestampPeriodNs = hwBenchTimestampPeriodNs_;
+    rd.hwError = vkError_;
     writeReportJSON(outPath("rtprobe-report.json"), rd);
 }
 
@@ -417,7 +432,8 @@ VkRtPush App::makeVkPush() const {
     p.maxBounces = maxBounces_;
     p.seed = 12345u;
     p.lightTriIndex = vkRt_.lightTriIndex();
-    p.pad0 = p.pad1 = 0;
+    p.lightTri2 = vkRt_.lightTriIndex2();
+    p.pad1 = 0;
     return p;
 }
 
@@ -481,6 +497,86 @@ void App::leaveHwRt() {
     sampleIndex_ = 0;
     overlayDirty_ = true;
     refreshOverlay();
+}
+
+int App::runHwRtBenchmark() {
+    yaw_ = 0.0f;
+    pitch_ = 0.10f;
+    distance_ = 3.2f;
+
+    int w = std::max(160, ctx_.width);
+    int h = std::max(120, ctx_.height);
+    std::string err;
+    logf("HW RT bench: initializing %dx%d", w, h);
+    if (!vkRt_.init(w, h, err)) {
+        vkError_ = err;
+        logf("HW RT bench init failed: %s", err.c_str());
+        return 3;
+    }
+    vkWidth_ = w;
+    vkHeight_ = h;
+    vkSampleIndex_ = 0;
+    logf("HW RT bench: device='%s' driver='%s' triangles=%u gpuTiming=%d period=%.2fns",
+         vkRt_.deviceName().c_str(), vkRt_.driverInfo().c_str(), vkRt_.triangleCount(),
+         (int)vkRt_.gpuTimingAvailable(), vkRt_.timestampPeriodNs());
+
+    double warmStart = nowMs();
+    uint32_t warmFrames = 0;
+    while ((nowMs() - warmStart) < hwBenchWarmupSeconds_ * 1000.0 && warmFrames < 120) {
+        vkSampleIndex_ = 0;
+        VkRtPush p = makeVkPush();
+        if (!vkRt_.render(p, err)) {
+            vkError_ = err;
+            logf("HW RT bench warmup render failed: %s", err.c_str());
+            return 4;
+        }
+        ++warmFrames;
+    }
+    logf("HW RT bench: warmup %u frames in %.2fs", warmFrames,
+         (nowMs() - warmStart) / 1000.0);
+
+    uint32_t target = 2000;
+    if (opts_.seconds <= 0) {
+        target = (uint32_t)std::min(2000, std::max(30, opts_.frames));
+    }
+
+    std::vector<double> cpuMs;
+    std::vector<double> gpuMs;
+    double measureStart = nowMs();
+    uint32_t frames = 0;
+    for (uint32_t i = 0; i < target; ++i) {
+        vkSampleIndex_ = 0;  // one sample per frame, no accumulation
+        double t0 = nowMs();
+        VkRtPush p = makeVkPush();
+        p.seed = i + 1;
+        if (!vkRt_.render(p, err)) {
+            vkError_ = err;
+            logf("HW RT bench render failed at frame %u: %s", i, err.c_str());
+            return 4;
+        }
+        double t1 = nowMs();
+        cpuMs.push_back(t1 - t0);
+        if (vkRt_.gpuTimingAvailable()) gpuMs.push_back(vkRt_.lastGpuMs());
+        ++frames;
+        if (opts_.seconds > 0 && (nowMs() - measureStart) >= opts_.seconds * 1000.0) break;
+    }
+
+    double gpuSum = 0.0;
+    for (double v : gpuMs) gpuSum += v;
+    bool gpuOk = vkRt_.gpuTimingAvailable() && !gpuMs.empty() && gpuSum > 0.0;
+    hwBenchResult_ = makeBenchResult((uint32_t)w, (uint32_t)h, 1, maxBounces_, cpuMs, gpuMs,
+                                     gpuOk, 0, hwBenchWarmupSeconds_, 0);
+    hwBenchRan_ = true;
+    hwBenchDevice_ = vkRt_.deviceName();
+    hwBenchDriver_ = vkRt_.driverInfo();
+    hwBenchExtensions_ = vkRt_.extensions();
+    hwBenchTriangles_ = vkRt_.triangleCount();
+    hwBenchTimestampPeriodNs_ = vkRt_.timestampPeriodNs();
+
+    logf("HW RT bench: frames=%u cpu p50=%.2fms gpu p50=%.2fms primaryRays/s=%.0f",
+         frames, hwBenchResult_.cpu.median, hwBenchResult_.gpu.median,
+         hwBenchResult_.primaryRaysPerSec);
+    return 0;
 }
 
 void App::startBenchmark() {
@@ -574,6 +670,9 @@ std::vector<std::string> App::buildOverlayLines() const {
                              vkRt_.lightTriIndex()));
         lines.push_back(strf("Frame: %.2f ms (%.1f FPS, Vk readback)", lastFrameMs_,
                              lastFrameMs_ > 0.0 ? 1000.0 / lastFrameMs_ : 0.0));
+        if (vkRt_.gpuTimingAvailable()) {
+            lines.push_back(strf("GPU: %.2f ms (Vulkan timestamp)", vkRt_.lastGpuMs()));
+        }
     } else {
         lines.push_back(strf("Mode: DEMO (software path tracer)   samples: %u   bounces: %u",
                              sampleIndex_, maxBounces_));

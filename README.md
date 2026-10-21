@@ -107,6 +107,19 @@ rtprobe.exe --bench --frames 300 --width 960 --height 540
 `--bench`는 창을 띄운 채 자동으로 워밍업 후 측정하고, 끝나면 종료합니다.
 기본 측정: 1280x720, 1 spp/frame, 4 bounces, 워밍업 10초, 600프레임.
 
+### 하드웨어 RT 벤치마크
+
+```text
+rtprobe.exe --bench-hw
+rtprobe.exe --bench-hw --seconds 20
+rtprobe.exe --bench-hw --frames 300 --width 960 --height 540
+```
+
+Vulkan ray query로 같은 장면을 프레임마다 1샘플씩(누적 없이) 렌더링하고,
+Vulkan 타임스탬프로 **GPU 프레임 타임**을, CPU 시간으로 **readback 포함 프레임 타임**을
+측정합니다. 결과는 리포트의 `hardware_rt_benchmark` 섹션에 기록됩니다.
+소프트웨어 벤치마크(`--bench`)와 같은 해상도/바운스에서 비교할 수 있습니다.
+
 ### 대화형 모드
 
 인자 없이 실행하면 데모가 바로 시작됩니다. 터치/마우스로 카메라를 돌릴 수 있습니다.
@@ -133,6 +146,7 @@ D3D12 오버레이 화면에 그대로 표시합니다. CPU readback 비용이 F
 --probe-only            진단만 수행하고 종료 (창 없음)
 --vulkan-rt, --hwrt     시작 시 Vulkan ray query HW RT 데모 활성화
 --bench                 워밍업 → 측정 → 리포트 → 종료 (소프트웨어 RT)
+--bench-hw, --hwrt-bench  Vulkan ray query 하드웨어 RT 벤치마크 → 리포트 → 종료
 --seconds N             고정 시간 측정 (N초)
 --frames N              고정 프레임 측정 (기본 600, 최대 2000)
 --width W --height H    렌더/창 해상도 (기본 1280x720)
@@ -163,6 +177,10 @@ D3D12 오버레이 화면에 그대로 표시합니다. CPU readback 비용이 F
   `gpu_timing=false`면 CPU present-to-present 폴백입니다.
 - `benchmark.primary_rays_per_sec`: 해상도 × spp × 프레임 / 시간 (정확값).
 - `benchmark.total_rays_per_sec`: 셰이더 내부 32비트 카운터 기반 (장시간/고해상도에서 wrap 가능).
+- `hardware_rt_benchmark`: Vulkan ray query 벤치 결과. `gpu_frame`은 Vulkan 타임스탬프,
+  `cpu_frame`은 CPU readback을 포함한 프레임 시간입니다. `timestamp_period_ns`로 원시 틱을
+  변환하며, `gpu_timing=false`면 CPU 값만 신뢰하세요.
+- `hardware_rt_benchmark.device`/`driver`/`extensions`: 실제 사용된 Vulkan RT 드라이버 정보.
 
 공정 비교 규칙: 동일 `width/height/spp/bounces/scene.hash/shader_hash`에서만 비교하고,
 여러 번 실행해 중앙값을 사용하세요. 발열 스로틀링 때문에 첫 실행은 버리는 것을 권장합니다.
@@ -175,8 +193,10 @@ D3D12 오버레이 화면에 그대로 표시합니다. CPU readback 비용이 F
 - **HW RT는 Vulkan 경로로 검증합니다.** `VK_KHR_acceleration_structure` +
   `VK_KHR_ray_query`(+ buffer device address)가 필요합니다. vkd3d-proton/DXR과 같은
   디바이스 드라이버를 사용하므로, 이 모드가 동작하면 하드웨어 RT 자체는 정상입니다.
-- HW RT 결과는 매 프레임 CPU로 읽어 D3D12 화면에 올리므로, 순수 GPU 렌더링보다
-  FPS가 낮게 나옵니다. GPU 처리량 자체보다 "RT 경로가 실제로 동작하는가"를 보는 용도입니다.
+- HW RT 결과는 매 프레임 CPU로 읽어 D3D12 화면에 올리므로, 인터랙티브 모드의 FPS에는
+  readback 비용이 포함됩니다. GPU 처리량은 `--bench-hw`의 `gpu_frame` 지표를 사용하세요.
+- 소프트웨어/HW RT 장면은 구체 표현이 다릅니다(소프트웨어는 해석적 구체, HW는 삼각형 메시).
+  성능 비교 시 이 차이를 감안하세요.
 - **D3DCompile DXBC가 거부될 수 있습니다.** `rtprobe.log`의 `D3DCompile ... failed`와
   컴파일러 메시지를 확인하세요. vkd3d-proton 빌드에 따라 DXBC 지원이 다를 수 있습니다.
 - **검은 화면**: `--borderless`, 해상도 변경, `VKD3D_CONFIG` 제거 후 재시도.

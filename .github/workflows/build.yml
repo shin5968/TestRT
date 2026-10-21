@@ -17,21 +17,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: C:\llvm-mingw
+          key: llvm-mingw-20251216-ucrt-x86_64
+
       - name: Set up llvm-mingw (UCRT, x86_64)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $ver = "20251216"
-          $zip = "llvm-mingw-$ver-ucrt-x86_64.zip"
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/$zip"
-          Write-Host "Downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath C:\llvm-mingw -Force
-          $root = Get-ChildItem C:\llvm-mingw -Directory | Select-Object -First 1
-          if (-not $root) { throw "llvm-mingw extraction failed" }
-          $bin = Join-Path $root.FullName "bin"
+          $root = "C:\llvm-mingw\llvm-mingw-$ver-ucrt-x86_64"
+          $clang = Join-Path $root "bin\x86_64-w64-mingw32-clang++.exe"
+          if (-not (Test-Path $clang)) {
+            $zip = "llvm-mingw-$ver-ucrt-x86_64.zip"
+            $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/$zip"
+            Write-Host "Downloading $url"
+            Invoke-WebRequest -Uri $url -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath C:\llvm-mingw -Force
+          }
+          $bin = Join-Path $root "bin"
           $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          & (Join-Path $bin "x86_64-w64-mingw32-clang++.exe") --version
+          & $clang --version
 
       - name: Install Ninja
         run: choco install ninja -y --no-progress

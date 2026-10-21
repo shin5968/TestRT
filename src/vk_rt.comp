@@ -96,7 +96,10 @@ bool occluded(vec3 ro, vec3 rd, float tmax) {
 }
 
 vec3 sampleLight(vec3 pos, vec3 n, vec3 albedo) {
-    Tri lt = tris[pc.p1.y];
+    // The rectangular light is two triangles. Pick one uniformly; with a
+    // 50% selection probability the importance weight is 2 * triangleArea.
+    uint li = (rnd() < 0.5) ? pc.p1.y : pc.p1.z;
+    Tri lt = tris[li];
     float u = rnd();
     float v = rnd();
     if (u + v > 1.0) {
@@ -114,7 +117,7 @@ vec3 sampleLight(vec3 pos, vec3 n, vec3 albedo) {
     if (cosS <= 0.0 || cosL <= 0.0) return vec3(0);
     if (occluded(pos + n * 1e-3, L, dist - 1e-3)) return vec3(0);
     return (albedo / PI) * lt.emission.rgb *
-           (cosS * cosL / (dist * dist)) * area;
+           (cosS * cosL / (dist * dist)) * (2.0 * area);
 }
 
 vec3 tracePath(vec3 ro, vec3 rd) {
@@ -153,8 +156,10 @@ vec3 tracePath(vec3 ro, vec3 rd) {
             specular = true;
             vec3 pos = ro + rd * h.t;
             vec3 I = rd;
-            bool entering = dot(I, n) < 0.0;
-            vec3 N = entering ? n : -n;
+            // Use the geometric normal for the inside/outside test; n is already
+            // flipped toward the ray and would always report "entering".
+            bool entering = dot(I, h.n) < 0.0;
+            vec3 N = entering ? h.n : -h.n;
             float eta = entering ? (1.0 / 1.5) : 1.5;
             float cosi = clamp(-dot(I, N), 0.0, 1.0);
             float F = 0.04 + 0.96 * pow(1.0 - cosi, 5.0);

@@ -14,6 +14,7 @@
 struct AppOptions {
     bool probeOnly = false;
     bool bench = false;
+    bool benchHw = false;
     bool vulkanRt = false;
     bool vsync = false;
     bool borderless = false;
@@ -47,6 +48,7 @@ private:
     void resetAccumulation();
     bool enterHwRt();
     void leaveHwRt();
+    int runHwRtBenchmark();
     FrameCB makeFrameCB(bool accumulate) const;
     VkRtPush makeVkPush() const;
     std::vector<std::string> buildOverlayLines() const;
@@ -99,6 +101,15 @@ private:
     BenchTiming benchTiming_;
     BenchResult benchResult_;
     bool benchRan_ = false;
+
+    bool hwBenchRan_ = false;
+    BenchResult hwBenchResult_;
+    std::string hwBenchDevice_;
+    std::string hwBenchDriver_;
+    std::string hwBenchExtensions_;
+    uint32_t hwBenchTriangles_ = 0;
+    double hwBenchTimestampPeriodNs_ = 0.0;
+    double hwBenchWarmupSeconds_ = 3.0;
 
     float yaw_ = 0.0f;
     float pitch_ = 0.10f;

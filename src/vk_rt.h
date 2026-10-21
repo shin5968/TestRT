@@ -17,7 +17,7 @@ struct VkRtPush {
     uint32_t maxBounces;
     uint32_t seed;
     uint32_t lightTriIndex;
-    uint32_t pad0;
+    uint32_t lightTri2;
     uint32_t pad1;
 };
 static_assert(sizeof(VkRtPush) == 96, "VkRtPush must match vk_rt.comp");
@@ -42,6 +42,11 @@ public:
     const std::string& driverInfo() const { return driverInfo_; }
     const std::string& extensions() const { return extensions_; }
     uint32_t lightTriIndex() const { return lightTriIndex_; }
+    uint32_t lightTriIndex2() const { return lightTriIndex_ + 1; }
+    uint32_t triangleCount() const { return triangleCount_; }
+    double lastGpuMs() const { return lastGpuMs_; }
+    bool gpuTimingAvailable() const { return gpuTimingAvailable_; }
+    double timestampPeriodNs() const { return timestampPeriodNs_; }
 
 private:
     struct Impl;
@@ -54,4 +59,8 @@ private:
     std::string driverInfo_;
     std::string extensions_;
     uint32_t lightTriIndex_ = 0;
+    uint32_t triangleCount_ = 0;
+    double lastGpuMs_ = 0.0;
+    bool gpuTimingAvailable_ = false;
+    double timestampPeriodNs_ = 0.0;
 };
